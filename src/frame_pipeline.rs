@@ -12,7 +12,7 @@ pub trait PipelineStep {
     ///
     /// # Returns
     /// * `io::Result<Frame>` - The processed frame or an error
-    fn process(&self, frame: &Frame) -> io::Result<Frame>;
+    fn process(&self, frame: Frame, frame_count: u32) -> io::Result<Frame>;
 
     /// Get the name of this pipeline step for debugging and logging
     fn name(&self) -> &str;
@@ -63,12 +63,12 @@ impl FramePipeline {
         self.debug = debug;
     }
 
-    pub fn process_frame(&mut self, frame: &Frame, frame_count: u32) -> io::Result<Frame> {
-        let mut current_frame = frame.clone();
+    pub fn process_frame(&mut self, frame: Frame, frame_count: u32) -> io::Result<Frame> {
+        let mut current_frame = frame;
 
         // Create frame-specific output directory
-        let frame_dir = PathBuf::from(&self.output_dir)
-            .join(format!("frame_{:08}_output", frame_count));
+        let frame_dir =
+            PathBuf::from(&self.output_dir).join(format!("frame_{:08}_output", frame_count));
 
         std::fs::create_dir_all(&frame_dir)?;
 
@@ -78,8 +78,8 @@ impl FramePipeline {
                 println!("Executing step {}: {}", index + 1, step.name());
             }
 
-            // Process the frame through this step
-            current_frame = step.process(&current_frame)?;
+            // Process frame and immediately drop the old one
+            current_frame = step.process(current_frame, frame_count)?;
 
             // If in debug mode, save intermediate results
             if self.debug {
@@ -96,8 +96,10 @@ impl FramePipeline {
 
         // Save the final processed frame
         let frame_path = frame_dir.join(format!("frame_{:08}.png", frame_count));
-
-        current_frame.save(&frame_path)?;
+        {
+            let tmp_frame = current_frame.clone();
+            tmp_frame.save(&frame_path)?;
+        }
 
         Ok(current_frame)
     }

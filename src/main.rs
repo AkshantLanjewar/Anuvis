@@ -1,5 +1,7 @@
 mod frame_pipeline;
+mod pipeline_steps;
 mod video_pipeline;
+
 use clap::Parser;
 
 // handle command line arguments
@@ -23,6 +25,12 @@ fn main() {
     // create frame pipeline
     let mut frame_pipeline = frame_pipeline::FramePipeline::new(&args.output).unwrap();
 
+    // add canny edge detection step
+    let edge_detection =
+        pipeline_steps::canny_edge_detection::CannyEdgeDetection::new(&args.output)
+        .unwrap();
+    frame_pipeline.add_step(edge_detection);
+
     // start pipeline
     pipeline.start().unwrap();
 
@@ -34,9 +42,14 @@ fn main() {
             frame.print_pixel(10, 10);
 
             // process frame
-            frame_pipeline.process_frame(&frame, frame_count).unwrap();
+            let hang = frame_pipeline.process_frame(frame, frame_count).unwrap();
+            drop(hang);
         }
 
         frame_count += 1;
     }
+
+    // cleanup pipeline and video once done as well
+    drop(frame_pipeline);
+    drop(pipeline);
 }

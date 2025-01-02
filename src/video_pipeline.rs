@@ -1,14 +1,13 @@
 use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app::{self as gst_app, AppSink};
-use std::thread;
-use std::time::Duration;
+use image::{ImageBuffer, Rgb};
 use std::io;
 use std::path::PathBuf;
-use std::fs;
-use image::{ImageBuffer, Rgb};
+use std::thread;
+use std::time::Duration;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Frame {
     pub data: Vec<u8>,
     pub width: i32,
@@ -23,54 +22,179 @@ impl Frame {
         }
 
         // Calculate position in the data array
-        // Each pixel is 3 bytes (RGB), and we need to convert 2D coordinates to 1D array index
-        let index = (y * self.width * 3 + x * 3) as usize;
+        let index = match self.channels {
+            1 => (y * self.width + x) as usize,
+            3 => (y * self.width * 3 + x * 3) as usize,
+            _ => return None,
+        };
 
-        if index + 2 >= self.data.len() {
-            return None;
+        match self.channels {
+            1 => {
+                if index >= self.data.len() {
+                    return None;
+                }
+                // For grayscale, return the same value for R, G, and B
+                let value = self.data[index] as i32;
+                Some((value, value, value))
+            }
+            3 => {
+                if index + 2 >= self.data.len() {
+                    return None;
+                }
+                Some((
+                    self.data[index] as i32,
+                    self.data[index + 1] as i32,
+                    self.data[index + 2] as i32,
+                ))
+            }
+            _ => None,
+        }
+    }
+
+    pub fn to_grayscale(self) -> Frame {
+        // Take ownership instead of reference
+        if self.channels == 1 {
+            return self; // Return self directly if already grayscale
         }
 
-        Some((
-            self.data[index] as i32,     // Red
-            self.data[index + 1] as i32, // Green
-            self.data[index + 2] as i32, // Blue
-        ))
+        // Pre-allocate buffer
+        let height = self.height;
+        let width = self.width;
+
+        let size = (self.width * self.height) as usize;
+        let mut gray_data = vec![0u8; size];
+
+        // Convert using direct indexing
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if let Some((r, g, b)) = self.get_pixel(x, y) {
+                    let idx = (y * self.width + x) as usize;
+                    gray_data[idx] =
+                        ((0.299 * r as f32) + (0.587 * g as f32) + (0.114 * b as f32)) as u8;
+                }
+            }
+        }
+
+        // Drop self explicitly since we own it
+        drop(self);
+
+        Frame {
+            data: gray_data,
+            width: width,
+            height: height,
+            channels: 1,
+        }
     }
 
     pub fn print_pixel(&self, x: i32, y: i32) {
         match self.get_pixel(x, y) {
-            Some((r, g, b)) => println!(
-                "Pixel at ({}, {}): RGB({}, {}, {}) - Hex: #{:02X}{:02X}{:02X}",
-                x, y, r, g, b, r as u8, g as u8, b as u8
-            ),
+            Some((r, g, b)) => {
+                if self.channels == 1 {
+                    println!(
+                        "Pixel at ({}, {}): Grayscale({}) - Hex: #{:02X}{:02X}{:02X}",
+                        x, y, r, r as u8, r as u8, r as u8
+                    );
+                } else {
+                    println!(
+                        "Pixel at ({}, {}): RGB({}, {}, {}) - Hex: #{:02X}{:02X}{:02X}",
+                        x, y, r, g, b, r as u8, g as u8, b as u8
+                    );
+                }
+            }
             None => println!("Pixel position ({}, {}) is out of bounds", x, y),
         }
     }
 
     pub fn save(&self, path: &PathBuf) -> io::Result<()> {
-        // Ensure we have RGB data
-        if self.channels != 3 {
-            return Err(io::Error::new(
+        match self.channels {
+            1 => {
+                // Pre-allocate RGB buffer with exact size
+                let size = (self.width * self.height * 3) as usize;
+                let mut rgb_data = vec![0u8; size];
+
+                // Direct indexing instead of flat_map
+                for (i, &v) in self.data.iter().enumerate() {
+                    let rgb_idx = i * 3;
+                    rgb_data[rgb_idx] = v;
+                    rgb_data[rgb_idx + 1] = v;
+                    rgb_data[rgb_idx + 2] = v;
+                }
+
+                let img_buffer = ImageBuffer::<Rgb<u8>, _>::from_raw(
+                    self.width as u32,
+                    self.height as u32,
+                    rgb_data,
+                )
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "Failed to create image buffer")
+                })?;
+
+                img_buffer.save(path).unwrap();
+                Ok(())
+            }
+            3 => {
+                let img_buffer = ImageBuffer::<Rgb<u8>, _>::from_raw(
+                    self.width as u32,
+                    self.height as u32,
+                    self.data.to_vec(),
+                )
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "Failed to create image buffer")
+                })?;
+
+                img_buffer.save(path).unwrap();
+                Ok(())
+            }
+            _ => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("Expected RGB frame (3 channels), got {} channels", self.channels)
-            ));
+                format!("Unsupported number of channels: {}", self.channels),
+            )),
+        }
+    }
+
+    // Optional: Add a conversion back to RGB if needed
+    pub fn to_rgb(self) -> Frame {
+        if self.channels == 3 {
+            return self;
         }
 
-        // Convert to ImageBuffer
-        let img_buffer = ImageBuffer::<Rgb<u8>, _>::from_raw(
-            self.width as u32,
-            self.height as u32,
-            self.data.clone()
-        ).ok_or_else(|| io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Failed to create image buffer"
-        ))?;
+        let width = self.width;
+        let height = self.height; 
 
-        // Save as PNG
-        img_buffer.save(path).map_err(|e| io::Error::new(
-            io::ErrorKind::Other,
-            format!("Failed to save image: {}", e)
-        ))
+        let size = (self.width * self.height * 3) as usize;
+        let mut rgb_data = vec![0u8; size];
+
+        for (i, &value) in self.data.iter().enumerate() {
+            let rgb_idx = i * 3;
+            rgb_data[rgb_idx] = value;
+            rgb_data[rgb_idx + 1] = value;
+            rgb_data[rgb_idx + 2] = value;
+        }
+
+        // Drop original data
+        drop(self);
+
+        Frame {
+            data: rgb_data,
+            width: width,
+            height: height,
+            channels: 3,
+        }
+    }
+}
+
+// Remove Clone derive
+impl Clone for Frame {
+    fn clone(&self) -> Self {
+        let mut new_data = vec![0u8; self.data.len()];
+        new_data.copy_from_slice(&self.data);
+
+        Frame {
+            data: new_data,
+            width: self.width,
+            height: self.height,
+            channels: self.channels,
+        }
     }
 }
 
@@ -225,12 +349,15 @@ impl VideoPipeline {
         }
 
         // reset pipeline state
-        pipeline.pipeline.set_state(gst::State::Null).map_err(|_e| {
-            gst::glib::Error::new(
-                gst::LibraryError::Failed,
-                "Failed to set pipeline state to null",
-            )
-        })?;
+        pipeline
+            .pipeline
+            .set_state(gst::State::Null)
+            .map_err(|_e| {
+                gst::glib::Error::new(
+                    gst::LibraryError::Failed,
+                    "Failed to set pipeline state to null",
+                )
+            })?;
 
         Ok(pipeline)
     }
