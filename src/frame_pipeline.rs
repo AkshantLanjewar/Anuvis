@@ -64,13 +64,18 @@ impl FramePipeline {
     }
 
     pub fn process_frame(&mut self, frame: Frame, frame_count: u32) -> io::Result<Frame> {
-        let mut current_frame = frame;
-
         // Create frame-specific output directory
         let frame_dir =
             PathBuf::from(&self.output_dir).join(format!("frame_{:08}_output", frame_count));
 
         std::fs::create_dir_all(&frame_dir)?;
+
+        let frame_path = frame_dir.join(format!("frame_pre_{:08}.png", frame_count));
+        let mut current_frame = frame;
+        {
+            let tmp_frame = current_frame.clone();
+            tmp_frame.save(&frame_path)?;
+        }
 
         // Process through each step
         for (index, step) in self.steps.iter().enumerate() {

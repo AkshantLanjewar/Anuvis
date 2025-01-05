@@ -1,13 +1,18 @@
 use crate::frame_pipeline::PipelineStep;
 use crate::video_pipeline::Frame;
+use super::double_thresholding::DoubleThresholder;
+use super::eight_conn_edge_tracker::eight_conn_edge_tracker_hysteris;
 use super::gaussian_blur::GaussianBlur;
+use super::gradient_calculation::SobelOperator;
+use super::non_max_suppression::GradNonMaxSuppression;
 
 use std::io;
+use std::path::Path;
 
 pub struct CannyEdgeDetection {
     /// Directory to store debug output and intermediate results
     output_dir: String,
-    gaussian: GaussianBlur
+    gaussian: GaussianBlur,
 }
 
 impl CannyEdgeDetection {
@@ -16,7 +21,7 @@ impl CannyEdgeDetection {
 
         Ok(Self {
             output_dir: output_dir.to_string(),
-            gaussian: gaussian
+            gaussian: gaussian,
         })
     }
 }
@@ -24,7 +29,18 @@ impl CannyEdgeDetection {
 impl PipelineStep for CannyEdgeDetection {
     fn process(&self, frame: Frame, frame_count: u32) -> io::Result<Frame> {
         // create internal frame pipeline
+        // step 1, gaussian noise reduction
         let nframe = self.gaussian.process(frame, frame_count)?;
+        // step 2, calculate gradients
+        let gradients = SobelOperator::calculate_gradient(&nframe);
+        // step 3, non max suppression of gradients back into a frame
+        let nframe = GradNonMaxSuppression::suppress(gradients);
+        // step 4, double thresholding
+        let thresholder = DoubleThresholder::new(10, 40);
+        let thresholded = thresholder.threshold(nframe.clone()); // NOTE: remove the clone
+        // step 5, hysteria edge tracking
+        let nframe = eight_conn_edge_tracker_hysteris(thresholded);
+        
         //let nframe = frame;
 
         Ok(nframe)
