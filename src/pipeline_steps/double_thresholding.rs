@@ -22,7 +22,7 @@ impl DoubleThresholder {
         Self { min, max }
     }
 
-    pub fn threshold(&self, frame: Frame) -> Vec<Vec<MeasuredPixel>> {
+    pub fn threshold(&self, frame: &Frame) -> Vec<Vec<MeasuredPixel>> {
         let mut result = Vec::with_capacity(frame.height as usize);
 
         for y in 0..frame.height {

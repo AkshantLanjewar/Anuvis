@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Frame {
     pub data: Vec<u8>,
     pub width: i32,
@@ -51,15 +51,11 @@ impl Frame {
         }
     }
 
-    pub fn to_grayscale(self) -> Frame {
-        // Take ownership instead of reference
+    pub fn to_grayscale(&mut self) -> &mut Self {
+        // Early return if already grayscale
         if self.channels == 1 {
-            return self; // Return self directly if already grayscale
+            return self;
         }
-
-        // Pre-allocate buffer
-        let height = self.height;
-        let width = self.width;
 
         let size = (self.width * self.height) as usize;
         let mut gray_data = vec![0u8; size];
@@ -75,15 +71,11 @@ impl Frame {
             }
         }
 
-        // Drop self explicitly since we own it
-        drop(self);
+        // Replace the existing data
+        self.data = gray_data;
+        self.channels = 1;
 
-        Frame {
-            data: gray_data,
-            width: width,
-            height: height,
-            channels: 1,
-        }
+        self
     }
 
     pub fn print_pixel(&self, x: i32, y: i32) {
@@ -159,7 +151,7 @@ impl Frame {
         }
 
         let width = self.width;
-        let height = self.height; 
+        let height = self.height;
 
         let size = (self.width * self.height * 3) as usize;
         let mut rgb_data = vec![0u8; size];
@@ -179,21 +171,6 @@ impl Frame {
             width: width,
             height: height,
             channels: 3,
-        }
-    }
-}
-
-// Remove Clone derive
-impl Clone for Frame {
-    fn clone(&self) -> Self {
-        let mut new_data = vec![0u8; self.data.len()];
-        new_data.copy_from_slice(&self.data);
-
-        Frame {
-            data: new_data,
-            width: self.width,
-            height: self.height,
-            channels: self.channels,
         }
     }
 }
@@ -257,6 +234,8 @@ impl VideoPipeline {
         let sink: AppSink = gst_app::AppSink::builder()
             .name("appsink")
             .caps(&caps)
+            .max_buffers(2)
+            .drop(true)
             .build();
 
         // set the video file path
@@ -388,9 +367,14 @@ impl VideoPipeline {
             .map(|sample| {
                 let buffer = sample.buffer().unwrap();
                 let map = buffer.map_readable().unwrap();
+                let data = map.as_slice().to_vec();
+
+                // drop map and buffer
+                drop(map);
+                drop(sample);
 
                 Frame {
-                    data: map.as_slice().to_vec(),
+                    data: data,
                     width: self.width,
                     height: self.height,
                     channels: 3, // RGB format

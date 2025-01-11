@@ -149,7 +149,7 @@ impl GaussianBlur {
 }
 
 impl PipelineStep for GaussianBlur {
-    fn process(&self, frame: Frame, _frame_count: u32) -> io::Result<Frame> {
+    fn process(&self, frame: &mut Frame, _frame_count: u32) -> io::Result<()> {
         // Input validation
         if frame.width <= 0 || frame.height <= 0 {
             return Err(BlurError::InvalidDimensions(format!(
@@ -164,30 +164,28 @@ impl PipelineStep for GaussianBlur {
         }
 
         // Convert to grayscale
-        let mut gframe = frame.to_grayscale();
-        let width = gframe.width as usize;
-        let height = gframe.height as usize;
+        frame.to_grayscale();
+
+        let width = frame.width as usize;
+        let height = frame.height as usize;
 
         // Create temporary buffers that will be dropped at end of scope
         let mut temp = vec![0u8; width * height];
 
         // Process horizontal pass
-        self.horizontal_pass(&gframe.data, &mut temp, width, height)
+        self.horizontal_pass(&frame.data, &mut temp, width, height)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
 
         // Update frame data
-        gframe.data.clear();
-        gframe.data.reserve_exact(width * height);
-        gframe.data.resize(width * height, 0);
+        frame.data.clear();
+        frame.data.reserve_exact(width * height);
+        frame.data.resize(width * height, 0);
 
         // Process vertical pass
-        self.vertical_pass(&temp, &mut gframe.data, width, height)
+        self.vertical_pass(&temp, &mut frame.data, width, height)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
 
-        // temp buffer will be dropped here automatically
-        drop(temp);
-
-        Ok(gframe)
+        Ok(())
     }
 
     fn name(&self) -> &str {

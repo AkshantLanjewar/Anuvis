@@ -12,7 +12,7 @@ pub trait PipelineStep {
     ///
     /// # Returns
     /// * `io::Result<Frame>` - The processed frame or an error
-    fn process(&self, frame: Frame, frame_count: u32) -> io::Result<Frame>;
+    fn process(&self, frame: &mut Frame, frame_count: u32) -> io::Result<()>;
 
     /// Get the name of this pipeline step for debugging and logging
     fn name(&self) -> &str;
@@ -63,7 +63,7 @@ impl FramePipeline {
         self.debug = debug;
     }
 
-    pub fn process_frame(&mut self, frame: Frame, frame_count: u32) -> io::Result<Frame> {
+    pub fn process_frame(&mut self, frame: &mut Frame, frame_count: u32) -> io::Result<()> {
         // Create frame-specific output directory
         let frame_dir =
             PathBuf::from(&self.output_dir).join(format!("frame_{:08}_output", frame_count));
@@ -71,11 +71,7 @@ impl FramePipeline {
         std::fs::create_dir_all(&frame_dir)?;
 
         let frame_path = frame_dir.join(format!("frame_pre_{:08}.png", frame_count));
-        let mut current_frame = frame;
-        {
-            let tmp_frame = current_frame.clone();
-            tmp_frame.save(&frame_path)?;
-        }
+        frame.save(&frame_path)?;
 
         // Process through each step
         for (index, step) in self.steps.iter().enumerate() {
@@ -84,7 +80,7 @@ impl FramePipeline {
             }
 
             // Process frame and immediately drop the old one
-            current_frame = step.process(current_frame, frame_count)?;
+            step.process(frame, frame_count)?;
 
             // If in debug mode, save intermediate results
             if self.debug {
@@ -95,17 +91,14 @@ impl FramePipeline {
                     frame_count
                 ));
 
-                current_frame.save(&debug_path)?;
+                frame.save(&debug_path)?;
             }
         }
 
         // Save the final processed frame
         let frame_path = frame_dir.join(format!("frame_{:08}.png", frame_count));
-        {
-            let tmp_frame = current_frame.clone();
-            tmp_frame.save(&frame_path)?;
-        }
+        frame.save(&frame_path)?;
 
-        Ok(current_frame)
+        Ok(())
     }
 }

@@ -7,7 +7,6 @@ use super::gradient_calculation::SobelOperator;
 use super::non_max_suppression::GradNonMaxSuppression;
 
 use std::io;
-use std::path::Path;
 
 pub struct CannyEdgeDetection {
     /// Directory to store debug output and intermediate results
@@ -27,23 +26,25 @@ impl CannyEdgeDetection {
 }
 
 impl PipelineStep for CannyEdgeDetection {
-    fn process(&self, frame: Frame, frame_count: u32) -> io::Result<Frame> {
+    fn process(&self, frame: &mut Frame, frame_count: u32) -> io::Result<()> {
         // create internal frame pipeline
         // step 1, gaussian noise reduction
-        let nframe = self.gaussian.process(frame, frame_count)?;
+        self.gaussian.process(frame, frame_count)?;
         // step 2, calculate gradients
-        let gradients = SobelOperator::calculate_gradient(&nframe);
+        let gradients = SobelOperator::calculate_gradient(
+            frame
+        );
         // step 3, non max suppression of gradients back into a frame
-        let nframe = GradNonMaxSuppression::suppress(gradients);
+        *frame = GradNonMaxSuppression::suppress(gradients);
         // step 4, double thresholding
         let thresholder = DoubleThresholder::new(10, 40);
-        let thresholded = thresholder.threshold(nframe.clone()); // NOTE: remove the clone
+        let thresholded = thresholder.threshold(frame); // NOTE: remove the clone
         // step 5, hysteria edge tracking
-        let nframe = eight_conn_edge_tracker_hysteris(thresholded);
+        *frame = eight_conn_edge_tracker_hysteris(thresholded);
         
         //let nframe = frame;
 
-        Ok(nframe)
+        Ok(())
     }
 
     fn name(&self) -> &str {

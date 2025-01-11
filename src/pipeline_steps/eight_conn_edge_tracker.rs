@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 
 use super::double_thresholding::{MeasuredPixel, Strength};
 
-pub fn eight_conn_edge_tracker_hysteris(pixels: Vec<Vec<MeasuredPixel>>) -> Frame {
+pub fn eight_conn_edge_tracker_hysteris(mut pixels: Vec<Vec<MeasuredPixel>>) -> Frame {
     let height = pixels.len() as i32;
     let width = pixels[0].len() as i32;
     let mut output_data = vec![0u8; (width * height) as usize];
@@ -58,6 +58,13 @@ pub fn eight_conn_edge_tracker_hysteris(pixels: Vec<Vec<MeasuredPixel>>) -> Fram
             }
         }
     }
+
+    // We can drop pixels row by row as we process them
+    for row in pixels.drain(..) {
+        drop(row);
+    }
+    // Explicitly drop the outer vector
+    drop(pixels);
 
     Frame {
         data: output_data,
